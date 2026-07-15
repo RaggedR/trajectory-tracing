@@ -1,0 +1,10 @@
+{
+  "conjecture": "Two-row Kostka formula",
+  "status": "proved",
+  "tree": {
+    "id": "tworow-kostka",
+    "approach": "Direct computation of Kostka numbers for two-row shapes",
+    "trust": "proved",
+    "children": []
+  }
+}

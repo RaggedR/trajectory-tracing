@@ -1,0 +1,5 @@
+{"id": "evt-0001", "agent": "macbeth", "phase": "prove", "kind": "read", "action": "read Niu-Spivak 2312.00990 on Day convolution", "inputs": [], "outputs": ["def:day-convolution"], "source_depth": "deep-read"}
+{"id": "evt-0002", "agent": "macbeth", "phase": "prove", "kind": "compute", "action": "introduced extension functor on containers", "inputs": ["evt-0001"], "outputs": ["map:extension-functor"]}
+{"id": "evt-0003", "agent": "macbeth", "phase": "prove", "kind": "compute", "action": "defined Dirichlet tensor by transporting along extension functor", "inputs": ["evt-0002"], "outputs": ["def:dirichlet-tensor"], "meta": {"defined_using": "evt-0002"}}
+{"id": "evt-0004", "agent": "macbeth", "phase": "prove", "kind": "compute", "action": "checked extension functor preserves Dirichlet tensor", "inputs": ["evt-0003", "evt-0002"], "outputs": ["result:preservation"]}
+{"id": "evt-0005", "agent": "macbeth", "phase": "prove", "kind": "verify", "action": "verified extension functor is strict monoidal for Dirichlet tensor", "inputs": ["evt-0004"], "outputs": [], "verification_target": "evt-0003", "meta": {"preserves_structure": "evt-0003", "preserving_map": "evt-0002"}}

@@ -1,0 +1,4 @@
+{"id": "evt-0001", "agent": "lyra", "phase": "prove", "kind": "read", "action": "read migration topology data", "inputs": [], "outputs": ["data:migration-results"], "source_depth": "deep-read"}
+{"id": "evt-0002", "agent": "lyra", "phase": "prove", "kind": "compute", "action": "computed lambda_2 for the RING topology (undirected cycle)", "inputs": ["evt-0001"], "outputs": ["result:lambda2-ring:object=undirected-cycle"]}
+{"id": "evt-0003", "agent": "lyra", "phase": "prove", "kind": "claim", "action": "claimed ring/star inversion at n=7 based on lambda_2", "inputs": ["evt-0002"], "outputs": ["claim:ring-star-inversion:object=directed-ring"]}
+{"id": "evt-0004", "agent": "lyra", "phase": "prove", "kind": "verify", "action": "verified ring/star inversion using lambda_2 computation", "inputs": ["evt-0002"], "outputs": [], "verification_target": "evt-0003"}

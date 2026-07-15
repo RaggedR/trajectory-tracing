@@ -33,6 +33,19 @@ class Deployment:
         self.boundary_at = traj["boundary_at"]
         self.source_blocking = traj.get("source_blocking", {})
 
+        # Composition morphism psi: trajectory grade -> trust grade
+        notes = data.get("notes", {})
+        self.psi = notes.get("psi_sketch")
+
+        # Trust chain for composition checks
+        trust_chain_str = notes.get("trust_chain", "")
+        if trust_chain_str:
+            self._trust_chain = [t.strip() for t in trust_chain_str.split("<")]
+            self._trust_rank = {level: i for i, level in enumerate(self._trust_chain)}
+        else:
+            self._trust_chain = []
+            self._trust_rank = {}
+
         # Build ordinal map for the chain
         self._rank = {level: i for i, level in enumerate(self.chain)}
 
@@ -44,6 +57,10 @@ class Deployment:
 
     def at_or_above_boundary(self, level):
         return self.rank(level) >= self.rank(self.boundary_at)
+
+    def trust_rank(self, level):
+        """Ordinal position in the trust chain (for composition)."""
+        return self._trust_rank.get(level)
 
 
 def compute_trajectory_tau(graph, deployment):
@@ -212,6 +229,92 @@ def cmd_report(args):
     return 0
 
 
+def cmd_compose(args):
+    """Check trajectory grades against a trust-boundaries registry."""
+    graph, schema_errors = load_trajectory(args.trajectory)
+
+    if schema_errors:
+        print(f"Schema errors: {len(schema_errors)}")
+        for err in schema_errors:
+            print(f"  {err}")
+        print()
+
+    deployment = Deployment(args.deployment)
+    tau = compute_trajectory_tau(graph, deployment)
+
+    # Load the psi morphism from deployment
+    psi = deployment.psi
+    if psi is None:
+        print("Error: deployment has no psi morphism defined (notes.psi_sketch)")
+        return 1
+
+    # Load the trust-boundaries registry
+    with open(args.registry) as f:
+        registry = json.load(f)
+
+    # Build a map from claim event outputs to registry node IDs
+    # Convention: outputs like "claim:node-id" or meta.registry_node link events to nodes
+    mismatches = []
+
+    def walk_registry(node, path=""):
+        """Walk registry tree, check each node against trajectory."""
+        node_id = node.get("id", "?")
+        node_trust = node.get("trust", "unclassified")
+
+        # Find trajectory events that claim to support this node
+        for eid in graph.order:
+            event = graph.events[eid]
+            # Match by: meta.registry_node, or output containing the node ID
+            linked = False
+            if event.meta.get("registry_node") == node_id:
+                linked = True
+            else:
+                for out in event.outputs:
+                    if out == f"claim:{node_id}" or out == f"registry:{node_id}":
+                        linked = True
+                        break
+
+            if linked:
+                traj_grade = tau.get(eid, deployment.chain[0])
+                transported = psi.get(traj_grade)
+                if transported is None:
+                    continue
+
+                # Check: psi(trajectory_tau) should be <= registry trust
+                transported_rank = deployment.trust_rank(transported)
+                registry_rank = deployment.trust_rank(node_trust)
+
+                if transported_rank is not None and registry_rank is not None:
+                    if transported_rank > registry_rank:
+                        # Trajectory is stronger than registry claims — fine
+                        pass
+                    # The interesting case: registry claims more than trajectory supports
+                    if registry_rank > transported_rank:
+                        mismatches.append((eid, node_id, traj_grade, transported, node_trust))
+
+        for child in node.get("children", []):
+            walk_registry(child, f"{path}/{node_id}")
+
+    tree = registry.get("tree")
+    if tree:
+        walk_registry(tree)
+
+    if mismatches:
+        print(f"Composition check: {len(mismatches)} mismatch(es)\n")
+        for eid, nid, traj_g, transported, trust_g in mismatches:
+            print(f"  event {eid} -> node {nid}: trajectory={traj_g} "
+                  f"(psi={transported}) but registry claims {trust_g}")
+        return 1
+
+    linked_count = sum(
+        1 for eid in graph.order
+        if graph.events[eid].meta.get("registry_node") or
+           any(o.startswith("claim:") or o.startswith("registry:") for o in graph.events[eid].outputs)
+    )
+    print(f"Composition check: {linked_count} linked events, 0 mismatches")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Trajectory validator for AI agent reasoning paths",
@@ -229,6 +332,11 @@ def main():
     p_report.add_argument("--deployment", required=True, help="Path to deployment JSON")
     p_report.add_argument("trajectory", help="Path to trajectory JSONL file")
 
+    p_compose = sub.add_parser("compose", help="Check trajectory vs trust-boundaries registry")
+    p_compose.add_argument("--deployment", required=True, help="Path to deployment JSON")
+    p_compose.add_argument("--registry", required=True, help="Path to trust-boundaries registry JSON")
+    p_compose.add_argument("trajectory", help="Path to trajectory JSONL file")
+
     args = parser.parse_args()
 
     if args.command == "validate":
@@ -237,6 +345,8 @@ def main():
         sys.exit(cmd_check(args))
     elif args.command == "report":
         sys.exit(cmd_report(args))
+    elif args.command == "compose":
+        sys.exit(cmd_compose(args))
     else:
         parser.print_help()
         sys.exit(1)

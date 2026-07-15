@@ -1,0 +1,3 @@
+{"id": "evt-0001", "agent": "clio", "phase": "prove", "kind": "read", "action": "read two-row hook paper", "inputs": [], "outputs": ["ref:hook-paper"], "source_depth": "agent-summary"}
+{"id": "evt-0002", "agent": "clio", "phase": "prove", "kind": "compute", "action": "computed Kostka numbers for two-row case", "inputs": ["evt-0001"], "outputs": ["result:kostka-two-row"]}
+{"id": "evt-0003", "agent": "clio", "phase": "prove", "kind": "claim", "action": "claimed two-row Kostka formula", "inputs": ["evt-0002"], "outputs": ["claim:kostka-formula", "registry:tworow-kostka"], "meta": {"registry_node": "tworow-kostka"}}

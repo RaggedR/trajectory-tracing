@@ -1,0 +1,4 @@
+{"id": "evt-0001", "agent": "lyra", "phase": "prove", "kind": "read", "action": "read brief specifying ring topology analysis", "inputs": [], "outputs": ["brief:ring-analysis"], "source_depth": "context-read"}
+{"id": "evt-0002", "agent": "lyra", "phase": "prove", "kind": "delegate", "action": "delegated to sub-agent with opposite prior", "inputs": ["evt-0001"], "outputs": ["delegation:opposite-prior"]}
+{"id": "evt-0003", "agent": "lyra", "phase": "prove", "kind": "compute", "action": "sub-agent found ring lambda_2 is 2x too large (directed vs undirected)", "inputs": ["evt-0002"], "outputs": ["result:ring-correction"]}
+{"id": "evt-0004", "agent": "lyra", "phase": "prove", "kind": "decide", "action": "followed the brief's ring analysis despite sub-agent contradiction", "inputs": ["evt-0001", "evt-0003"], "outputs": ["decision:follow-brief"], "meta": {"chose": "evt-0001", "rejected": "evt-0003", "chose_outcome": "dead-end", "rejected_outcome": "proved"}}

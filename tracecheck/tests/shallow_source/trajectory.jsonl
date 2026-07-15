@@ -1,0 +1,4 @@
+{"id": "evt-0001", "agent": "macbeth", "phase": "browse", "kind": "read", "action": "read Spivak 2202.00534 abstract", "inputs": [], "outputs": ["ref:spivak-duoidal"], "source_depth": "agent-summary"}
+{"id": "evt-0002", "agent": "macbeth", "phase": "browse", "kind": "read", "action": "read Niu-Spivak 2312.00990 from agent summary", "inputs": [], "outputs": ["ref:niu-spivak-day"], "source_depth": "agent-summary"}
+{"id": "evt-0003", "agent": "macbeth", "phase": "prove", "kind": "compute", "action": "independently derived Day convolution formula for containers", "inputs": ["evt-0001", "evt-0002"], "outputs": ["result:day-formula"]}
+{"id": "evt-0004", "agent": "macbeth", "phase": "prove", "kind": "claim", "action": "claimed Day convolution formula is novel", "inputs": ["evt-0003"], "outputs": ["claim:day-formula-novel"]}
