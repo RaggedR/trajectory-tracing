@@ -1,0 +1,16 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Lean build artifacts
+lean/.lake/
+
+# Python
+__pycache__/
+*.pyc
+
+# Trajectory logs (generated at runtime)
+state/

@@ -1,0 +1,31 @@
+{
+  "agent": "clio",
+  "description": "Trajectory evaluation config for Clio (algebraic combinatorics)",
+  "trajectory": {
+    "chain": [
+      "unsupported",
+      "shallow",
+      "independent",
+      "cross-verified",
+      "mechanically-checked"
+    ],
+    "boundary_at": "independent",
+    "source_blocking": {
+      "independent": {
+        "all_reads_below": "agent-summary",
+        "message": "claim at 'independent' or above requires at least one deep read in its ancestry"
+      }
+    }
+  },
+  "notes": {
+    "trust_boundaries_agent": "clio",
+    "trust_chain": "speculative < computed < peer-claimed < proved < peer-reviewed < published < lean-verified",
+    "psi_sketch": {
+      "unsupported": "speculative",
+      "shallow": "computed",
+      "independent": "proved",
+      "cross-verified": "peer-reviewed",
+      "mechanically-checked": "lean-verified"
+    }
+  }
+}

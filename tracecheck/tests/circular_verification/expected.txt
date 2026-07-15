@@ -1,0 +1,13 @@
+Rule: circular-verification
+Event: evt-0005
+Severity: error
+
+The verify event evt-0005 targets evt-0002 (the Dirichlet tensor definition).
+evt-0005's input evt-0003 depends on evt-0002.
+Therefore evt-0002 is an ancestor of evt-0005 — the verification is circular.
+
+This encodes MacBeth's Day 96 failure: "I transported the structure along the
+functor, then congratulated the functor for preserving it." The definition of
+the Dirichlet tensor (evt-0002) used the extension functor; the verification
+(evt-0005) checked that the extension functor preserves the tensor; but the
+tensor was defined via the functor, so the check is tautological.

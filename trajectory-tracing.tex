@@ -1,0 +1,344 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{stmaryrd}
+\usepackage{tikz-cd}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[margin=2.5cm]{geometry}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{example}[definition]{Example}
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{corollary}[definition]{Corollary}
+\newtheorem{proposition}[definition]{Proposition}
+\theoremstyle{remark}
+\newtheorem{remark}[definition]{Remark}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!60!black},
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!5},
+}
+
+\title{Trajectory Tracing for Epistemically Honest AI Agents\\[6pt]
+\large Complementing Output Trust with Path Soundness}
+\author{Robin Langer \and Claude (Opus 4.6)}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We introduce \emph{trajectory tracing}, a system for evaluating whether an AI agent took a sound reasoning path to arrive at its claims, complementing the \emph{trust-boundaries} system which evaluates the epistemic quality of the claims themselves. Where trust-boundaries asks ``is this claim structurally justified?'', trajectory tracing asks ``did the agent's reasoning path contain detectable anti-patterns?'' We show that trajectory systems are instances of trust systems in the sense of Langer (2026), so the canonical grading function $\tau$, the certificate lemma, and the transport theorem all transfer directly. We define five trajectory anti-patterns motivated by real failures from deployed mathematical research agents, implement a validator for the first (circular verification), and describe how trajectory evaluation composes with output trust evaluation via a monotone morphism.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+The trust-boundaries system~\cite{trust-boundaries} provides a framework for grading the epistemic quality of mathematical claims produced by AI agents. A trust system $(D, T, s)$ consists of a DAG $D$ of claims, a totally ordered chain $T$ of trust levels, and a grading function $s : D \to T$. The canonical grade $\tau$ is computed by well-founded recursion as the weakest link along all dependency paths, and the boundary rule ensures that claims above a threshold have all dependencies also above that threshold. The system is deployed across four agents (Clio, Rick, MacBeth, and a RAG loop), with cross-agent trust transport governed by monotone maps $\varphi$.
+
+This system evaluates \textbf{output}---the final claims in a registry. It does not evaluate \textbf{trajectory}---the sequence of actions the agent took to arrive at those claims. Google's ``The New SDLC With Vibe Coding''~\cite{google-sdlc} identifies this as a fundamental gap in agent evaluation:
+
+\begin{quote}
+Output evaluation checks the final artifact: does the code compile, do the tests pass? Trajectory evaluation checks the full sequence of tool calls and intermediate reasoning. Both are necessary because a fluent output that skipped its verification steps is a more dangerous failure than one with a visible error.
+\end{quote}
+
+Five failure modes from the agents' own dream journals motivate the present work. In each case, the output passed (or would have passed) trust-boundaries validation, but the reasoning path contained a detectable anti-pattern.
+
+\subsection{Motivating failures}
+
+\begin{enumerate}[label=\textbf{F\arabic*.}]
+\item \textbf{Circular verification} (MacBeth, 2026-07-14). The agent defined the Dirichlet tensor product on containers by transporting along the extension functor $\llbracket - \rrbracket$. It then verified that $\llbracket - \rrbracket$ preserves the Dirichlet tensor---but the tensor was \emph{defined} via $\llbracket - \rrbracket$, so the verification tested a tautology. In the agent's own words: ``I transported the structure along the functor, then congratulated the functor for preserving it.''
+
+\item \textbf{Tautological transport} (MacBeth, 2026-07-14). More generally, any verification of the form ``$F$ preserves $S$'' where $S$ was defined using $F$ is tautological. The verification target was derived from the thing being tested.
+
+\item \textbf{Estimand substitution} (Lyra, GECCO 2026). Across 13 instances, the agent cited a correct number as evidence for a claim it did not actually support---the number was computed for a different mathematical object than the one in the claim. ``A true number reaching for an object it did not have.''
+
+\item \textbf{Shallow source depth} (MacBeth, 2026-07-14). The agent independently re-derived a result, believing it to be novel, when the result was a numbered proposition in a standard reference sitting in its own reading list---at \texttt{agent-summary} depth. ``The reproof$\to$citation pattern has now fired four times, and every single time the scooping source was at \texttt{agent-summary} depth.''
+
+\item \textbf{Brief-as-deme} (Lyra, GECCO 2026). Sub-agents contradicted the brief and were correct. The trajectory that followed the brief looked procedurally sound (``follow the specification''), but the brief itself was the error source. ``The lesson is not `spawn more verifiers'\,---\,what works is the opposite-prior pair.''
+\end{enumerate}
+
+\subsection{Contribution}
+
+We make the following contributions:
+\begin{enumerate}
+\item We define \emph{trajectory systems} as instances of trust systems (Section~\ref{sec:trajectory-systems}), inheriting the canonical grading $\tau$, the certificate lemma, and the transport theorem.
+\item We define five \emph{anti-pattern rules} as computable predicates on trajectory graphs (Section~\ref{sec:rules}), each motivated by a real failure.
+\item We describe how trajectory evaluation \emph{composes} with output trust evaluation via a monotone morphism $\psi$ (Section~\ref{sec:composition}).
+\item We implement and validate the system for one agent (Clio), with a deployment-descriptor pattern that extends to other agents by adding a JSON file (Section~\ref{sec:implementation}).
+\end{enumerate}
+
+\section{Trajectory Systems}\label{sec:trajectory-systems}
+
+\subsection{Events and the trajectory graph}
+
+\begin{definition}[Trajectory event]
+A \emph{trajectory event} is a record $e = (\mathit{id}, \mathit{kind}, \mathit{action}, \mathit{inputs}, \mathit{outputs}, \ldots)$ where:
+\begin{itemize}
+\item $\mathit{id}$ is a unique identifier,
+\item $\mathit{kind} \in \{\texttt{compute}, \texttt{read}, \texttt{claim}, \texttt{verify}, \texttt{cite}, \texttt{delegate}, \texttt{decide}\}$,
+\item $\mathit{inputs}$ is a list of event IDs (causal dependencies),
+\item $\mathit{outputs}$ is a list of artifact references produced.
+\end{itemize}
+Events of kind \texttt{verify} carry additional fields: a \emph{verification target} (the event ID being verified) and a \emph{verification method}.
+\end{definition}
+
+\begin{definition}[Trajectory graph]
+A \emph{trajectory graph} is a DAG $G = (V, E)$ where $V$ is a set of events and $(u, v) \in E$ iff $u \in \mathit{inputs}(v)$. The graph must be acyclic.
+\end{definition}
+
+\subsection{Trajectory grading}
+
+\begin{definition}[Trajectory chain]
+A \emph{trajectory chain} $T$ is a finite totally ordered set of grades. Our default chain is:
+\[
+\texttt{unsupported} < \texttt{shallow} < \texttt{independent} < \texttt{cross-verified} < \texttt{mechanically-checked}
+\]
+\end{definition}
+
+\begin{definition}[Own-grade]
+The \emph{own-grade} function $g : V \to T$ assigns each event a grade based on its kind and properties:
+\begin{itemize}
+\item \texttt{read} events: grade depends on source depth (\texttt{deep-read} $\mapsto$ \texttt{independent}, \texttt{agent-summary} $\mapsto$ \texttt{unsupported}).
+\item \texttt{compute} events: \texttt{independent} (computations produce independent evidence).
+\item \texttt{verify} events: grade depends on verification method (\texttt{independent}, \texttt{cross-verified}, \texttt{mechanically-checked}, or \texttt{unsupported} for circular/tautological).
+\item \texttt{claim}, \texttt{cite}, \texttt{delegate}, \texttt{decide}: \texttt{shallow} (these get their grade from inputs).
+\end{itemize}
+\end{definition}
+
+\begin{definition}[Canonical trajectory grade]
+The \emph{canonical trajectory grade} $\tau : V \to T$ is defined by well-founded recursion:
+\[
+\tau(e) = \min\bigl(g(e),\; \min_{d \in \mathit{inputs}(e)} \tau(d)\bigr)
+\]
+\end{definition}
+
+\begin{proposition}\label{prop:instance}
+A trajectory graph with its trajectory chain and canonical grading is an instance of a trust system $(D, T, s)$ in the sense of~\emph{\cite{trust-boundaries}}. Therefore:
+\begin{enumerate}
+\item $\tau$ is the greatest sound assignment (certificate lemma).
+\item Any over-claiming ($s(e) > \tau(e)$) is detectable.
+\item Morphisms transport $\tau$ laxly: $\varphi(\tau(e)) \leq \tau'(F(e))$ (transport theorem).
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+Set $C = V$ (events as claims), define checking steps as the dependency edges, and set the grade function to $\tau$. The definitions match exactly. The proofs in Trust.lean apply without modification.
+\end{proof}
+
+\begin{definition}[Trajectory boundary rule]
+A trajectory grade at or above a boundary level $b \in T$ requires all input events to also be at or above $b$. This is the boundary rule from trust-boundaries, instantiated on trajectory events.
+\end{definition}
+
+\section{Anti-Pattern Rules}\label{sec:rules}
+
+Each anti-pattern is a computable predicate on the trajectory graph. When a rule fires, it produces a \emph{violation} with severity (error or warning).
+
+\subsection{Rule 1: Circular verification}
+
+\begin{definition}[Circular verification]
+A \texttt{verify} event $e$ has \emph{circular verification} if its verification target $t$ is an ancestor of $e$ in the dependency DAG. That is, there exists a directed path from $t$ to $e$ through the \texttt{inputs} relation.
+\end{definition}
+
+\begin{lemma}
+Circular verification implies $\tau(e) = \bot$ on the cycle.
+\end{lemma}
+
+\begin{proof}
+If $t$ is an ancestor of $e$ and $e$ verifies $t$, the verification evidence was derived from the thing being verified. No independent evidence exists, so the own-grade of the verify event is \texttt{unsupported} (= $\bot$). Since $\tau$ propagates the minimum, $\tau(e) = \bot$.
+\end{proof}
+
+\begin{example}[MacBeth Day 96]
+The trajectory graph contains:
+\begin{align*}
+e_1 &: \texttt{read} \text{ (definition of strict monoidal functor)} \\
+e_2 &: \texttt{compute} \text{ (define Dirichlet tensor via extension functor)} \\
+e_3 &: \texttt{compute} \text{ (check functor preserves Dirichlet tensor)} \\
+e_5 &: \texttt{verify} \text{ (verify preservation), target } = e_2, \text{ inputs } = \{e_3\}
+\end{align*}
+Since $e_3$ depends on $e_2$ (the tensor definition), and $e_5$ depends on $e_3$, the target $e_2$ is an ancestor of $e_5$. The circular verification rule fires.
+\end{example}
+
+\subsection{Rule 2: Tautological transport (future)}
+
+A \texttt{verify} event $e$ verifying that a map $F$ preserves a structure $S$, where $S$ was \emph{defined} using $F$ (i.e., the definition event of $S$ has $F$'s introduction event in its inputs).
+
+\subsection{Rule 3: Estimand substitution (future)}
+
+A \texttt{verify} or \texttt{cite} event where the evidence's object tag disagrees with the claim's object tag---a correct number cited against the wrong mathematical object.
+
+\subsection{Rule 4: Shallow source depth (future)}
+
+A \texttt{claim} event at trajectory grade \texttt{independent} or above where every \texttt{read} event in its transitive input closure has source depth at or below \texttt{agent-summary}. This mirrors the source-blocking rule in trust-boundaries.
+
+\subsection{Rule 5: Brief-as-deme (future)}
+
+A \texttt{decide} event that chose path $A$ (following the brief) over a sub-agent's recommended path $B$, where the trust-boundaries registry later shows $\text{claim}(A) = \texttt{dead-end}$ and $\text{claim}(B) \geq \texttt{proved}$. This rule is \emph{retrospective}---it fires after the outcome is known.
+
+\begin{remark}
+Rule 5 is honest about what is detectable in real time versus in hindsight. At the moment of the decision, the brief looks authoritative. Only after the alternative proves correct and the brief's path dies can the anti-pattern be identified. This is a structural limitation, not a design flaw.
+\end{remark}
+
+\section{Composition with Trust-Boundaries}\label{sec:composition}
+
+\subsection{The morphism $\psi$}
+
+Trust-boundaries evaluates claims; trajectory-tracing evaluates reasoning paths. The two compose via a monotone map:
+
+\begin{definition}[Trajectory-trust morphism]
+A \emph{trajectory-trust morphism} is a monotone map $\psi : T_{\text{traj}} \to T_{\text{trust}}$ from the trajectory chain to the trust chain. It maps trajectory grades to trust grades:
+\begin{center}
+\begin{tabular}{lcl}
+\texttt{unsupported} & $\mapsto$ & \texttt{speculative} \\
+\texttt{shallow} & $\mapsto$ & \texttt{computed} \\
+\texttt{independent} & $\mapsto$ & \texttt{proved} \\
+\texttt{cross-verified} & $\mapsto$ & \texttt{peer-reviewed} \\
+\texttt{mechanically-checked} & $\mapsto$ & \texttt{lean-verified}
+\end{tabular}
+\end{center}
+\end{definition}
+
+\subsection{The composition rule}
+
+\begin{definition}[Composition check]
+Given a trajectory graph $G$ with canonical grading $\tau_G$, a trust-boundaries registry $R$ with canonical grading $\tau_R$, and a morphism $\psi$, the \emph{composition check} verifies:
+\[
+\forall e \in V_G,\; \forall n \in V_R : \quad \text{if } e \text{ supports } n, \text{ then } \psi(\tau_G(e)) \leq \tau_R(n)
+\]
+A violation means the trajectory is weaker than the trust grade claims: the registry says \texttt{proved}, but the trajectory is \texttt{shallow}.
+\end{definition}
+
+\begin{proposition}
+The composition check is an instance of the transport theorem (Trust.lean, Lemma 3.2): $\psi(\tau_G(e)) \leq \tau_R(\psi_{\text{claim}}(e))$.
+\end{proposition}
+
+\begin{remark}
+This gives a two-layer evaluation:
+\begin{enumerate}
+\item \textbf{Trust-boundaries}: Is the claim structurally justified by its sub-claims?
+\item \textbf{Trajectory-tracing}: Was the reasoning path that produced the claim sound?
+\end{enumerate}
+A claim can pass layer 1 and fail layer 2 (correct output, flawed path---fragile). A claim can fail layer 1 and pass layer 2 (incorrect output, sound path---fixable). The two failures have different characters and demand different responses.
+\end{remark}
+
+\section{Implementation}\label{sec:implementation}
+
+\subsection{Architecture}
+
+The implementation mirrors the trust-boundaries architecture:
+
+\begin{itemize}
+\item \textbf{Validator} (\texttt{tracecheck/tracecheck.py}): CLI with three commands (\texttt{validate}, \texttt{check}, \texttt{report}). Python 3.10+, stdlib only.
+\item \textbf{Schema} (\texttt{tracecheck/schema.py}): Event validation, DAG construction from JSONL files.
+\item \textbf{Rules} (\texttt{tracecheck/rules.py}): Anti-pattern detection. Currently Rule 1 (circular verification); Rules 2--5 as future work.
+\item \textbf{Emitter} (\texttt{tracecheck/emit.py}): Lightweight library ($\sim$40 lines) that agents import to produce trajectory events as append-only JSONL.
+\item \textbf{Deployment descriptors} (\texttt{deployments/*.json}): Per-agent configuration. Currently Clio; Rick and MacBeth require only adding a JSON file.
+\end{itemize}
+
+\subsection{Event format}
+
+Events are stored as JSONL (one JSON object per line):
+
+\begin{lstlisting}[firstnumber=1]
+{"id": "evt-0001", "agent": "clio", "phase": "prove",
+ "kind": "read", "action": "read Koroteev-Smirnov 2412.19383",
+ "inputs": [], "outputs": ["def:p-curvature"],
+ "source_depth": "deep-read"}
+{"id": "evt-0002", "agent": "clio", "phase": "prove",
+ "kind": "compute",
+ "action": "computed p-curvature spectrum at q=zeta_p",
+ "inputs": ["evt-0001"], "outputs": ["result:spectrum"]}
+\end{lstlisting}
+
+\subsection{Deployment descriptor}
+
+Each agent's trajectory configuration is a JSON file specifying the trajectory chain, boundary level, and (future) the composition morphism $\psi$:
+
+\begin{lstlisting}[firstnumber=1]
+{
+  "agent": "clio",
+  "trajectory": {
+    "chain": ["unsupported", "shallow", "independent",
+              "cross-verified", "mechanically-checked"],
+    "boundary_at": "independent"
+  }
+}
+\end{lstlisting}
+
+Adding a new agent requires only creating a new descriptor file. The schema, rules, and CLI are agent-agnostic.
+
+\subsection{Validation results}
+
+Running the validator on the circular-verification test fixture (encoding MacBeth's Day 96 failure):
+
+\begin{lstlisting}[language=bash]
+$ python3 tracecheck/tracecheck.py check \
+    --deployment deployments/clio.json \
+    tracecheck/tests/circular_verification/trajectory.jsonl
+
+Trajectory check: 1 error(s), 0 warning(s)
+
+  [error] circular-verification at evt-0005:
+    verification target 'evt-0002' is an ancestor of this
+    verify event -- the evidence depends on the thing being
+    verified, making the check tautological
+\end{lstlisting}
+
+The trajectory report shows canonical grades cascading through the DAG:
+
+\begin{lstlisting}
+evt-0001  read      tau=unsupported  inputs=[(none)]
+evt-0002  compute   tau=unsupported  inputs=[evt-0001]
+evt-0003  compute   tau=unsupported  inputs=[evt-0002]
+evt-0004  claim     tau=unsupported  inputs=[evt-0003]
+evt-0005  verify    tau=unsupported  inputs=[evt-0003] ** FLAGGED **
+\end{lstlisting}
+
+Every event inherits \texttt{unsupported} because the sole \texttt{read} event was at \texttt{agent-summary} depth. The circular verification flag is the structural failure; the uniformly low $\tau$ is the grading consequence.
+
+\section{Future Work}
+
+\begin{enumerate}
+\item \textbf{Rules 2--5}: Tautological transport, estimand substitution, shallow source depth, and brief-as-deme detection.
+\item \textbf{Composition command}: A \texttt{compose} subcommand that takes both a trajectory JSONL and a trust-boundaries registry, checking that $\psi(\tau_G) \leq \tau_R$.
+\item \textbf{Lean formalization}: Trajectory systems as instances of \texttt{System} from Trust.lean. Anti-pattern predicates with proofs that violations imply $\tau = \bot$. The key insight making this tractable: the Lean proofs transfer directly because trajectory systems \emph{are} trust systems.
+\item \textbf{Agent integration}: Instrumenting Clio's \texttt{prove} phase with \texttt{emit} calls, then Rick and MacBeth.
+\item \textbf{Retrospective trajectory extraction}: Mining existing dream journals and agent logs to reconstruct trajectory graphs post hoc, enabling evaluation of historical sessions.
+\end{enumerate}
+
+\section{Related Work}
+
+Trajectory evaluation is discussed in Google's ``The New SDLC With Vibe Coding''~\cite{google-sdlc} in the context of software engineering agents, where it refers to checking that a coding agent used the right tools, followed the right steps, and didn't skip verification. Our setting is different: mathematical research agents whose ``tools'' are computations, paper reads, and proof attempts. The anti-patterns we detect (circular verification, estimand substitution) are specific to epistemic reasoning, not software development.
+
+The trust-boundaries system~\cite{trust-boundaries} provides the formal foundation. The canonical grading $\tau$, the certificate lemma, the transport theorem, and the directed-container structure are all inherited directly. The present work adds a new dimension (trajectory) that composes with the existing dimension (output trust) via a monotone morphism.
+
+Lyra's ``brief-as-deme'' finding (GECCO 2026) is itself a result \emph{about} multi-agent trajectory diversity. Her discovery---that diversity of \emph{priors} (via opposite-prior pairs) matters more than diversity of \emph{vendors} (spawning more agents)---suggests that trajectory evaluation should attend to the prior structure of verification, not just its presence.
+
+\begin{thebibliography}{9}
+\bibitem{trust-boundaries}
+R.~Langer et al., \emph{Trust Boundaries: Epistemically Honest AI Agents}, 2026.
+Software: \texttt{github.com/RaggedR/trust-boundaries}.
+
+\bibitem{google-sdlc}
+A.~Osmani, S.~Saboo, and S.~Kartakis, \emph{The New SDLC With Vibe Coding: From Ad-Hoc Prompting to Agentic Engineering}, Google, May 2026.
+
+\bibitem{trust-lean}
+R.~Langer, \emph{Trust.lean: Formalised Trust Systems in Lean~4}, 2026.
+No sorry, no Mathlib. Included in~\cite{trust-boundaries}.
+\end{thebibliography}
+
+\end{document}
