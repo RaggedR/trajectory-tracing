@@ -1,5 +1,7 @@
 # trajectory-tracing
 
+[![Lean CI](https://github.com/RaggedR/trajectory-tracing/actions/workflows/lean_action_ci.yml/badge.svg)](https://github.com/RaggedR/trajectory-tracing/actions/workflows/lean_action_ci.yml)
+
 Trajectory evaluation for AI agents doing mathematical research. Complements [trust-boundaries](../trust-boundaries/) which evaluates **output** (are claims structurally justified?) by evaluating **trajectory** (did the agent take a sound path to arrive at its claims?).
 
 ## Motivation
